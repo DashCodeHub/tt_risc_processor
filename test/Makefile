@@ -6,7 +6,9 @@ SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+# CHANGED (Phase 6): list ALL design sources - project.v alone cannot elaborate,
+# since it instantiates risc_machine and the whole module tree below it.
+PROJECT_SOURCES = project.v risc_machine2.v loader.v ProcessingUnit.v ControlUnit2.v main_memory.v alu.v mux.v InstructionRegister.v ProgramCounter.v compute_offset.v AddressRegister.v CheckZero.v D_flop.v RegisterFile.v increment.v decoder.v sign_ext_immediate.v
 
 ifneq ($(GATES),yes)
 
