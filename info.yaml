@@ -8,7 +8,7 @@ project:
   clock_hz:     20000000  # 10 MHz claim; multicycle core - confirm against hardening timing report
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
-  tiles: "3x2"          # 885 flip-flops measured at synthesis - needs 4 tiles
+  tiles: "2x2"          # 885 flip-flops measured at synthesis - needs 4 tiles
 
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
   top_module:  "tt_um_dash_lucas_risc"
