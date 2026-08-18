@@ -6,7 +6,10 @@
 // FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
 // OLD: `include "main_memory.v"
 
-module risc_machine (clk, rst);
+// PHASE 2 (BUG-02): boot-loader interface added. The RP2040 loads the program through
+// loader.v into main_memory, then releases the CPU. See loader.v header for the protocol.
+// OLD: module risc_machine (clk, rst);
+module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done);
     // parameters description
     parameter data_width = 16; // Width of all data
     parameter addr_width = 8; // Address width for memory and Program Counter
@@ -20,6 +23,12 @@ module risc_machine (clk, rst);
 
     //input output declaration
     input clk, rst;
+    // PHASE 2 (BUG-02): loader pins (from TT wrapper / RP2040) + status out
+    input load_req;    // high = load session (loader owns memory write port, CPU held)
+    input load_strobe; // rising edge = sample one serial bit
+    input load_data;   // serial program bit, MSB first
+    input run;         // rising edge after boot -> CPU starts from PC=0
+    output boot_done;  // high = a load session has completed
 
     // Selects for Buses
     wire [sel_bus_1_size-1:0] Sel_Bus_1_MUX; // Selct BUS_1 Control Signal
@@ -46,9 +55,31 @@ module risc_machine (clk, rst);
     wire RF_Wr; // FIX (BUG-04): explicit register-file write enable, CU -> PU
     wire D_wr; // data write enable signal
 
+    // PHASE 2 (BUG-02): loader nets
+    wire ld_wr;                        // loader word-write pulse
+    wire [4:0] ld_addr;                // loader write address (32-word memory)
+    wire [data_width-1:0] ld_word;     // assembled program word
+    wire load_mode;                    // 1 = loader owns memory write port
+    wire cpu_go;                       // 1 = CPU released from reset
+
+    loader LD (
+        .clk(clk), .rst(rst),
+        .load_req(load_req), .load_strobe(load_strobe), .load_data(load_data), .run(run),
+        .ld_wr(ld_wr), .ld_addr(ld_addr), .ld_word(ld_word),
+        .load_mode(load_mode), .boot_done(boot_done), .cpu_go(cpu_go)
+    );
+
+    // PHASE 2: CPU run gate. Instead of adding S_load/S_ready states to the FSM
+    // (original Phase-4 plan), the whole CPU core is simply held in its existing
+    // reset while loading and until `run` is latched. Zero FSM surgery, and the
+    // CPU can never issue reads/writes while the loader owns the memory. After
+    // power-up the CPU also stays off until the first `run` - memory is garbage
+    // before a load, so free-running would execute noise.
+    wire core_rst = rst & cpu_go;      // active-low, like rst
+
     //ProcessingUnit
     // FIX (BUG-04): RF_Wr added after RF_W_Addr (positional port list must match ProcessingUnit)
-    ProcessingUnit PU (instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, RF_Wr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, rst);
+    ProcessingUnit PU (instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, RF_Wr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, core_rst); // PHASE 2: was rst - CPU now gated by loader
 
     // Control Unit
     ControlUnit2 CU(
@@ -66,14 +97,19 @@ module risc_machine (clk, rst);
         Reg_Z_Ld, // Control Signal to Load Reg_Z (Zero ALU Flag)
         alu_zero, //Output flag for alu_output is 0 or not
         D_wr, // Data Write Enable signal to read memory
-        clk, rst);
+        clk, core_rst); // PHASE 2: was rst - CPU now gated by loader
 
     // Memory Unit 
+    // PHASE 2 (BUG-02): write port muxed between loader (during load_mode) and CPU.
+    // Read port stays on the CPU address - harmless during load since the CPU is held
+    // in reset. Memory is now 32 words: only address[4:0] indexes it; the CPU's 8-bit
+    // address space simply wraps (programs must stay within 0..31).
+    // OLD: main_memory MU(.W_data(Bus_1), .R_data(mem_read_data), .wr(D_wr), .addr(address), .clk(clk));
     main_memory MU(
-        .W_data(Bus_1),
+        .W_data(load_mode ? ld_word : Bus_1),
         .R_data(mem_read_data),
-        .wr(D_wr),
-        .addr(address),
+        .wr(load_mode ? ld_wr : D_wr),
+        .addr(load_mode ? ld_addr : address[4:0]),
         .clk(clk)
     );
     
