@@ -1,17 +1,29 @@
-`include "alu.v"
-`include "mux.v"
-`include "InstructionRegister.v"
-`include "ProgramCounter.v"
-`include "compute_offset.v"
-`include "AddressRegister.v"
-`include "CheckZero.v"
-`include "D_flop.v"
-`include "RegisterFile.v"
-`include "increment.v"
-`include "decoder.v"
-`include "sign_ext_immediate.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "alu.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "mux.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "InstructionRegister.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "ProgramCounter.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "compute_offset.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "AddressRegister.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "CheckZero.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "D_flop.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "RegisterFile.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "increment.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "decoder.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "sign_ext_immediate.v"
 
-module ProcessingUnit(instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, rst );
+module ProcessingUnit(instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, RF_Wr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, rst );
 
     // Define parameter
     parameter data_width = 16; // Width of all data
@@ -34,6 +46,7 @@ module ProcessingUnit(instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_rea
     
     input [data_width-1:0] mem_read_data; // input data from the memory
     input [RF_W_Addr_Width-1:0] RF_W_Addr; // input Reg File Address Control Signal to read register file 
+    input RF_Wr; // FIX (BUG-04): explicit register-file write enable from the control unit
     input PC_Ld; // Load PC Control Signal *To be used while BIZ, BNZ, JAL, JMP ,JR to update PC with Offset
     input PC_Inc; // Incremenet PC Control Signal
     input sel_PC_Offset_Update; // Select between offset update (a+b-1) or data from BUS_2
@@ -64,6 +77,7 @@ module ProcessingUnit(instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_rea
     // Connect a Register File Using Register File with decoder inbetween them 
     decoder_4_to_16 decode_RF_Address (
         .binary_in(RF_W_Addr),  // 4-bit binary input
+        .en(RF_Wr),             // FIX (BUG-04): decode (and thus write) only on explicit enable
         .dec_out(load_BUS_to_RF)    // 16-bit decoder output
     );
     // all registers in register file (16x16)
@@ -147,7 +161,12 @@ module ProcessingUnit(instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_rea
     RegisterUnit Reg_Y (.data_out(Reg_Y_Out), .data_in(Bus_2), .load(Reg_Y_Ld), .clk(clk), .rst(rst));
     // Check if Reg_Y output is zero
     CheckZero Check_Zero_for_RegY(
-        .Rp_data(Reg_Y_Out), // Input to Check Zero module from Reg_Y
+        // FIX (BUG-03): was .Rp_data(Reg_Y_Out). Reg_Y is a clocked register, so during the
+        // BIZ/BNZ decode state it still holds the PREVIOUS instruction's operand -> branches
+        // decided on stale data. Bus_1 carries the branch register's value combinationally in
+        // that same state, so checking Bus_1 gives the correct, same-cycle zero flag.
+        // OLD: .Rp_data(Reg_Y_Out), // Input to Check Zero module from Reg_Y
+        .Rp_data(Bus_1), // Input to Check Zero module: value currently selected onto Bus_1
         .Rp_zero(RF_Ry_Zero) // output to controller module
     );
 

@@ -9,6 +9,7 @@ S_ex1 = S_dec_source2 + S_ex1
 module ControlUnit2(
     PC_Ld, PC_Inc, sel_PC_Offset_Update, // Control Signals for PC
     RF_W_Addr,  // Address to write into Register File
+    RF_Wr, // FIX (BUG-04): NEW explicit register-file write enable (see decoder.v note)
     IR_Ld, // Control Signals to Load Instruction Register
     Sign_Ext_Flag, // Control Signal for Sign Extension immediate
     Sel_Bus_1_MUX, // Control Bus_1 MUX1
@@ -70,7 +71,8 @@ module ControlUnit2(
     parameter JAL = 4'b1101;
     parameter JMP = 4'b1110; 
     parameter JR = 4'b1111; 
-    parameter NO_INSTR = 4'bx;
+    // FIX (BUG-07): x-valued constant, unused anywhere; removed to keep the design x-free.
+    // OLD: parameter NO_INSTR = 4'bx;
 
     // Source and Destination Codes
     parameter R0 = 4'd0;
@@ -97,6 +99,7 @@ module ControlUnit2(
     output PC_Inc;
     output sel_PC_Offset_Update;
     output [RF_W_Addr_Width-1:0] RF_W_Addr;
+    output RF_Wr; // FIX (BUG-04): write happens ONLY when this is 1
     output IR_Ld;
     output Sign_Ext_Flag;
     output [sel_bus_1_size-1:0] Sel_Bus_1_MUX;
@@ -116,6 +119,7 @@ module ControlUnit2(
     reg PC_Inc;
     reg sel_PC_Offset_Update;
     reg [RF_W_Addr_Width-1:0] RF_W_Addr;
+    reg RF_Wr; // FIX (BUG-04)
     reg IR_Ld;
     reg Sign_Ext_Flag;
     //reg [sel_bus_1_size-1:0] Sel_Bus_1_MUX;
@@ -178,12 +182,17 @@ module ControlUnit2(
                                            Sel_R15 ? 15 :
                                            Sel_PC ? 16:
                                            Sel_Sign_Ext ? 17:
-                                           5'dx;  // Default value if none of the conditions are met
+                                           // FIX (BUG-07): was 5'dx; x lets synthesis pick any register
+                                           // onto Bus_1 when no select is active. Force a defined value.
+                                           // OLD: 5'dx;
+                                           5'd0;  // Default value if none of the conditions are met
 
     assign Sel_Bus_2_MUX[sel_bus_2_size-1:0] = Sel_ALU ? 0 :
                                             Sel_Bus_1 ? 1:
                                             Sel_Mem ? 2:
-                                            2'bx; // default value
+                                            // FIX (BUG-07): was 2'bx (same reasoning as above)
+                                            // OLD: 2'bx;
+                                            2'b0; // default value
 
     
     always @(posedge clk or negedge rst) begin: State_transitions 
@@ -195,7 +204,11 @@ module ControlUnit2(
         end
     end
 
-    always @(state or opcode or source or destination or alu_zero) begin: Output_and_Next_State
+    // FIX (BUG-06): sensitivity list was missing RF_Ry_Zero (read in BIZ/BNZ below), causing a
+    // simulation/synthesis mismatch: sim would not re-evaluate the branch decision when the zero
+    // flag changed. @(*) always matches what the block actually reads.
+    // OLD: always @(state or opcode or source or destination or alu_zero) begin: Output_and_Next_State
+    always @(*) begin: Output_and_Next_State
         Sel_R0 = 0;
         Sel_R1 = 0;
         Sel_R2 = 0;
@@ -214,10 +227,17 @@ module ControlUnit2(
         Sel_R15 = 0;
         Sel_PC = 0;
         Sel_Sign_Ext = 0;
-        RF_W_Addr = 4'bx; // makes all dec_out = 16'b0 i.e. all Load_Ri = 0
+        // FIX (BUG-04): OLD line relied on x to mean "no write" - only true in simulation.
+        // OLD: RF_W_Addr = 4'bx; // makes all dec_out = 16'b0 i.e. all Load_Ri = 0
+        RF_W_Addr = 4'b0;  // defined default; write gated by RF_Wr, not by x-magic
+        RF_Wr = 0;         // FIX (BUG-04): no register-file write unless a state asserts this
 
         PC_Ld = 0;
         PC_Inc = 0;
+        // FIX (BUG-05): sel_PC_Offset_Update was the ONLY control signal missing from this
+        // default list -> not assigned on every path -> synthesis inferred a level-sensitive
+        // LATCH ($_DLATCH_N_) on it. Latches are unclocked storage and break STA in the TT flow.
+        sel_PC_Offset_Update = 0;
         IR_Ld = 0;
         Sign_Ext_Flag = 0;
         Reg_Y_Ld = 0;
@@ -314,6 +334,7 @@ module ControlUnit2(
                                 Sel_ALU = 1;
                                 // Save the alu result to register in the register file again (address given in `destination`)
                                 RF_W_Addr = destination;
+                                RF_Wr = 1; // FIX (BUG-04): explicit write strobe
                             end // NOT, SRA, SLA
 
                             LI: begin
@@ -322,6 +343,7 @@ module ControlUnit2(
                                 Sel_Sign_Ext = 1; // pass to bus_1
                                 Sel_Bus_1 = 1; // pass the sign extended data to bus_2
                                 RF_W_Addr = destination; //save the result to destination register in the register file
+                                RF_Wr = 1; // FIX (BUG-04): explicit write strobe
                             end // LI
 
                             LW: begin 
@@ -362,7 +384,14 @@ module ControlUnit2(
                                     default err_flag = 1;
                                 endcase
                                 Sel_Bus_1 = 1; // tranfer the reg data to bus2
-                                Reg_Y_Ld = 1; // Load the reg data to Reg_Y to check if its 0 or not
+                                // FIX (BUG-03): OLD code loaded Reg_Y here and read RF_Ry_Zero in the
+                                // SAME state. Reg_Y only updates on the NEXT clock edge, so the zero
+                                // check saw the STALE Reg_Y left by a previous instruction -> wrong
+                                // branch decisions. Fix: CheckZero now watches Bus_1 directly (see
+                                // ProcessingUnit.v), where the branch register's value already is in
+                                // THIS cycle. Loading Reg_Y is no longer needed (also removes the side
+                                // effect of branches clobbering Reg_Y).
+                                // OLD: Reg_Y_Ld = 1; // Load the reg data to Reg_Y to check if its 0 or not
                                 // This will give you `RF_Ry_Zero` value can be 0 or 1
                                 case(RF_Ry_Zero) 
                                     RYis0: begin 
@@ -398,7 +427,14 @@ module ControlUnit2(
                                     default err_flag = 1;
                                 endcase
                                 Sel_Bus_1 = 1; // tranfer the reg data to bus2
-                                Reg_Y_Ld = 1; // Load the reg data to Reg_Y to check if its 0 or not
+                                // FIX (BUG-03): OLD code loaded Reg_Y here and read RF_Ry_Zero in the
+                                // SAME state. Reg_Y only updates on the NEXT clock edge, so the zero
+                                // check saw the STALE Reg_Y left by a previous instruction -> wrong
+                                // branch decisions. Fix: CheckZero now watches Bus_1 directly (see
+                                // ProcessingUnit.v), where the branch register's value already is in
+                                // THIS cycle. Loading Reg_Y is no longer needed (also removes the side
+                                // effect of branches clobbering Reg_Y).
+                                // OLD: Reg_Y_Ld = 1; // Load the reg data to Reg_Y to check if its 0 or not
                                 // This will give you `RF_Ry_Zero` value can be 0 or 1
                                 case(RF_Ry_Zero) 
                                     RYis0: begin // If RF_Ry_Zero = 0 
@@ -418,6 +454,7 @@ module ControlUnit2(
                                 Sel_PC = 1; // Get the PC + 1 from the PC on Bus 1
                                 Sel_Bus_1 = 1; // Get the PC+1 on Bus 2
                                 RF_W_Addr = destination; // load PC + 1 from Bus_2 to the destination register
+                                RF_Wr = 1; // FIX (BUG-04): explicit write strobe
                                 // Need to update PC to PC + offset (PC is already PC+1)
                                 sel_PC_Offset_Update = 1; // select to load the new address (i.e. PC + Offset) to PC
                                 PC_Ld = 1; // Load PC with new data
@@ -487,6 +524,7 @@ module ControlUnit2(
                 Sel_ALU = 1; // Send ALU result to BUS 2
                 // Now save the result to destinatination register
                 RF_W_Addr = destination;
+                RF_Wr = 1; // FIX (BUG-04): explicit write strobe
             end
             // S_ex1: begin 
             //     next_state = S_fet1; // Fetch after execution is complete
@@ -499,6 +537,7 @@ module ControlUnit2(
                 next_state = S_fet1; // Since load operation is complete
                 Sel_Mem = 1; // Get data to Bus 2 from the memory
                 RF_W_Addr = destination; //save the result to destination register in the register file
+                RF_Wr = 1; // FIX (BUG-04): explicit write strobe
             end
             S_wr1: begin 
                 next_state = S_fet1; // Since store operation is complete

@@ -1,5 +1,10 @@
 module decoder_4_to_16 (
     input wire [3:0] binary_in,  // 4-bit binary input
+    // FIX (BUG-04): added explicit enable. Previously the decoder ALWAYS asserted exactly one
+    // output for any input, so "no write" had to be faked with binary_in = 4'bx. Simulation
+    // treats x as "no case match" -> dec_out=0, but SYNTHESIS treats x as don't-care and picks
+    // a real value -> one register would be written EVERY cycle on silicon (sim/synth mismatch).
+    input wire en,               // 1 = decode, 0 = all outputs low (no register write)
     output reg [15:0] dec_out    // 16-bit decoder output
 );
 
@@ -8,6 +13,8 @@ module decoder_4_to_16 (
         // Initialize output to all zeros
         dec_out = 16'b0;
         
+        // FIX (BUG-04): only decode when enabled; otherwise all Load_Ri stay 0.
+        if (en) begin
         // Set the appropriate output bit based on the input
         case (binary_in)
             4'b0000: dec_out[0] = 1'b1;
@@ -28,5 +35,6 @@ module decoder_4_to_16 (
             4'b1111: dec_out[15] = 1'b1;
             default: dec_out = 16'b0;  // Default case for safety
         endcase
+        end // if (en)  (FIX BUG-04)
     end
 endmodule

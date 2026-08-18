@@ -1,7 +1,10 @@
 // Use new control Unit (COntrolUnit2)
-`include "ProcessingUnit.v"
-`include "ControlUnit2.v"
-`include "main_memory.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "ProcessingUnit.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "ControlUnit2.v"
+// FIX (BUG-09): include removed - TT builds from the info.yaml file list; keeping includes causes duplicate-module errors.
+// OLD: `include "main_memory.v"
 
 module risc_machine (clk, rst);
     // parameters description
@@ -40,15 +43,18 @@ module risc_machine (clk, rst);
     wire Reg_A_Ld; 
     wire Reg_Z_Ld; 
     wire [RF_W_Addr_Width-1:0] RF_W_Addr;
+    wire RF_Wr; // FIX (BUG-04): explicit register-file write enable, CU -> PU
     wire D_wr; // data write enable signal
 
     //ProcessingUnit
-    ProcessingUnit PU (instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, rst);
+    // FIX (BUG-04): RF_Wr added after RF_W_Addr (positional port list must match ProcessingUnit)
+    ProcessingUnit PU (instruction, RF_Ry_Zero, alu_zero, Bus_1, address, mem_read_data, RF_W_Addr, RF_Wr, PC_Ld, PC_Inc, sel_PC_Offset_Update, Sel_Bus_1_MUX, Sign_Ext_Flag, IR_Ld, Reg_Y_Ld, Sel_Bus_2_MUX, Reg_A_Ld, Reg_Z_Ld, clk, rst);
 
     // Control Unit
     ControlUnit2 CU(
         PC_Ld, PC_Inc, sel_PC_Offset_Update, // Control Signals for PC
         RF_W_Addr,  // Address to write into Register File
+        RF_Wr, // FIX (BUG-04): new write-enable output of the control unit
         IR_Ld, // Control Signals to Load Instruction Register
         Sign_Ext_Flag, // Control Signal for Sign Extension immediate
         Sel_Bus_1_MUX, // Control Bus_1 MUX1
