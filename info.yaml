@@ -5,7 +5,7 @@ project:
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "16-bit multicycle RISC CPU with 32x16 on-chip RAM, boot-loaded over a 2-pin serial link by the demo board RP2040, then runs standalone"
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     10000000  # 10 MHz claim; multicycle core - confirm against hardening timing report
+  clock_hz:     20000000  # 10 MHz claim; multicycle core - confirm against hardening timing report
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "2x2"          # 885 flip-flops measured at synthesis - needs 4 tiles
