@@ -9,7 +9,9 @@
 // PHASE 2 (BUG-02): boot-loader interface added. The RP2040 loads the program through
 // loader.v into main_memory, then releases the CPU. See loader.v header for the protocol.
 // OLD: module risc_machine (clk, rst);
-module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done);
+// PHASE 3 (BUG-01): observation interface added so the design has real outputs.
+// OLD: module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done);
+module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done, obs_sel, obs);
     // parameters description
     parameter data_width = 16; // Width of all data
     parameter addr_width = 8; // Address width for memory and Program Counter
@@ -29,6 +31,10 @@ module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done)
     input load_data;   // serial program bit, MSB first
     input run;         // rising edge after boot -> CPU starts from PC=0
     output boot_done;  // high = a load session has completed
+    // PHASE 3 (BUG-01): observation port - the TT wrapper exposes one byte of `obs`
+    // on uo_out. Without real outputs the whole design is dead logic to synthesis.
+    input [2:0] obs_sel;           // which internal value to observe
+    output [data_width-1:0] obs;   // selected 16-bit value (wrapper picks a byte)
 
     // Selects for Buses
     wire [sel_bus_1_size-1:0] Sel_Bus_1_MUX; // Selct BUS_1 Control Signal
@@ -112,5 +118,24 @@ module risc_machine (clk, rst, load_req, load_strobe, load_data, run, boot_done)
         .addr(load_mode ? ld_addr : address[4:0]),
         .clk(clk)
     );
+
+    // PHASE 3: memory-mapped OUTPUT register. Convention: the program stores its
+    // final result with SW to address 31; the store still lands in mem[31], but is
+    // ALSO captured here, where the host can always read it via the observation mux
+    // (no way to address arbitrary memory from outside with the pins we have).
+    reg [data_width-1:0] out_reg;
+    always @(posedge clk or negedge rst) begin
+        if (!rst) out_reg <= {data_width{1'b0}};
+        else if (!load_mode && D_wr && (address[4:0] == 5'd31)) out_reg <= Bus_1;
+    end
+
+    // PHASE 3: observation mux (obs_sel from ui_in[6:4] in the TT wrapper)
+    assign obs = (obs_sel == 3'd0) ? out_reg :                        // final result
+                 (obs_sel == 3'd1) ? {8'b0, address} :                // current mem address
+                 (obs_sel == 3'd2) ? Bus_1 :                          // live datapath bus
+                 (obs_sel == 3'd3) ? instruction :                    // current instruction
+                 (obs_sel == 3'd4) ? mem_read_data :                  // mem word at CPU addr
+                 (obs_sel == 3'd5) ? {11'b0, load_mode, cpu_go, boot_done, alu_zero, RF_Ry_Zero} : // status flags
+                 out_reg;                                             // defined default (BUG-07 discipline)
     
 endmodule

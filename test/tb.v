@@ -27,8 +27,9 @@ module tb ();
   wire VGND = 1'b0;
 `endif
 
-  // Replace tt_um_example with your module name:
-  tt_um_example user_project (
+  // CHANGED: was tt_um_example - must match top_module in info.yaml and
+  // the module name in src/project.v (the "three-name rule").
+  tt_um_dash_lucas_risc user_project (
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST
